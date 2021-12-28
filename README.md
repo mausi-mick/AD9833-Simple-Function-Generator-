@@ -1,6 +1,6 @@
 # AD9833-Simple-Function-Generator
 
-The project based on the projet "Signal Generator AD9833" from Peter Balch  :  https://www.instructables.com/Signal-Generator-AD9833/   
+The project based on the project "Signal Generator AD9833" from Peter Balch  :  https://www.instructables.com/Signal-Generator-AD9833/   
 
 where the input commands like Curve-Type (Sine, Triangle, Square) , Sweep or Frequency are send from a PC via USB to Arduino-Nano and from there ro the AD9833 modul.
 
