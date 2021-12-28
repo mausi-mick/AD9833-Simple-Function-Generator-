@@ -6,9 +6,12 @@ where the input commands like Curve-Type (Sine, Triangle, Square) , Sweep or Fre
 
 I changed the program, that it works standalone without connection to the PC.
 
-For input the commands I use a rotary encoder with integrated button-switch.
+For input the commands I use a rotary encoder with integrated push-button-switch.
 
 An HD44780 display (LCD1602) shows all information (Curve-Type, Frequency, seep ...) 
 
 On the Encoder and button-switch I use Pin-Change-Interrupt (PCI) for a quick change of the commnds and frequency.
+
+
+A small Vide is here: https://www.youtube.com/watch?v=DLXJh2jmxDk
 
