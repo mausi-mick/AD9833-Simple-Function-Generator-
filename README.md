@@ -31,4 +31,20 @@ So the Function Genaerator includes now this functions:
  - Arbitrary-Generator for Sinus, Trangle StepUp , StepDown und Squarewave for low frequencies (mHz to some kHz)
  - digital ConstantCurrentSource/Sink from 10 µA to 4.095 mA (Stepwidth : 1 µA) or (10 µA to 40.95 mA with stepwidth 10 µA)
 
+For small budget I use only a few parts with price over 1 $/€:
+
+ - AD9833
+ - HD44780 with I2C
+ - Arduino Nano (clone?)
+ - DAC MCP4822
+ - OPV MCP6002
+ - n-Mosfet BSP89
+ - Rotary Encoder with push-button
+ - n-Mosfet for switching Rp ( from 1025 Ohm to 10.25 Ohm) with Low R-on (< 100 mOhm)
+ - 5V Zener/Ref-Diode (for MCP4822/MCP6002)
+ - 2x MT3608 Step up (5V/ for Nano/LCD..., 28V for CurrentSource) 
+ - Battery-holder for 18650 Battery
+ - 18650 Lion-Battery (one peace)
+ - Usb loader Lion-loader board
+
 More information (current-source, arbitrary generator) in the next days.
