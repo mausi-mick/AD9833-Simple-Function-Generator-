@@ -16,13 +16,12 @@
 // CCS_AD9833_Nano_00: 2022_01_05: copy from  CCS_NanO_08 and AD9833_PCI_Nano_HD44780_02
 // CCS_AD9833_Nano_01: 2022_01_08: copy from  00. Test freq-Lo with Steps like current-steps
 // 
+//#include <SPI.h>                     // for DAC and AD9833
 #include <AD9833.h>                  // test
+#include <MCP4822.h>                 // DAC 12 bit
 #include <Encoder.h>
 #include <Wire.h>                    // Wire for I2C
 #include <LiquidCrystal_I2C.h>       // HD55780 LCD1602
-//#include <SPI.h>                     // for DAC
-#include <MCP48xx.h>                 // DAC 12 bit
-
 
 //------------------------  Encoder with ext. Interrupt: 
 const int ENC_CW   =  2; // ext.Int. Pin D2 <<-- change with D3 wrong direction ???
@@ -38,11 +37,12 @@ const int SG_FSYNC = 10; // AD9833 SPI-CS
 const int SG_DATA  = 11; // AD9833 SPI-MOSI
 const int SG_CLK   = 13; // AD9833 SPI-SCLK
 
-AD9833 ad9(SG_FSYNC);                 // SCK and MOSI must CLK and DAT pins on the AD9833 for SPI   
+AD9833 ad9(SG_FSYNC);               // SCK and MOSI must CLK and DAT pins on the AD9833 for SPI   
 
 LiquidCrystal_I2C lcd(0x27, 16, 2); // HEX-Address 0x27 (or 0x3F), 16 rows , 2 lines_I2C lcd(0x27, 20, 4)" 
 
-MCP4822 dac(DAC_CS);                 // CS-Pin 9, AD9833 on Pin 10   ####################################
+
+MCP4822 dac= MCP4822(DAC_CS);       // CS-Pin 9, AD9833 on Pin 10  
 
 Encoder myEnc(ENC_CW,ENC_CCW);
 
@@ -64,7 +64,7 @@ const uint16_t wft_h = 0x2020; // halfsquare
 //const int wSine     = 0b0000000000000000;
 //const int wTriangle = 0b0000000000000010;
 //const int wSquare   = 0b0000000000101000;
-
+const int step_t[]    = {1,2,3,5,6,9,10,15,30};                         // step-sine  0...8          
 const uint16_t sweep_t[] = {1000,2000,5000,10000,20000,50000};            // sweep-pos 
 const uint16_t delay_t[] = {100,200,500,1,2,5,10,20,50,100,200,500,1000}; // delay
 
@@ -101,7 +101,9 @@ byte C_C_3_Arrow_L[8] = {
 
 byte C_C_4_Arrow_R[8] = { 
   0b01000, 0b00100, 0b11110, 0b00001, 0b11110, 0b00100, 0b01000, 0b00000};
-
+  
+byte C_C_5_Tilde[8]  = { 
+  0b00000, 0b00000, 0b00000, 0b01000, 0b10101, 0b00010, 0b00000, 0b00000};
 /*
 byte C_C_5_Line_D[8] = {
   0b00000, 0b00000, 0b11111, 0b00000, 0b11111, 0b00000, 0b00000, 0b00000};
@@ -134,7 +136,7 @@ uint8_t freqSGHi[numberOfDigits] = {0,0,0,0,2,0,0,0}; // 20000 Hz
 
 //######## potencies basis 10:      0,1,2,3,4,5,6,7   #####
 
-long     ilm=0,ilt=0,ifu=9,istep=0,zconst,fox=0,fstart=0,f_lowo,gainy=10;
+long     ilm=0,ilt=0,ifu=9,istep=0,zconst,fox=100,fstart=0,f_lowo=100,gainy=10;
 int8_t   pos_i=15,pos_o=15,dig_o=0,dig_n=0,s_sel,ila=2,ido=10,ioo=0,igo=10;
 int16_t  iso=10,ist=10;
 int32_t  time_del=10,delay_s=0,off_s=0,off_r=0;
@@ -145,6 +147,7 @@ int32_t  fact_t[]={1,2,5,10,20,50,100,200,500,1000};
 uint8_t  func_t[]={0,1,2,3,4};
 uint8_t  digi_t[] = {0,0,0,0};
 long     dig4_0_t[] = {0,0,0,0,0};
+long     dig7_0_t[] = {0,0,0,0,0,0,0,0};
 uint32_t time_t[] = {0,1,2,5,10,20,50,100,200,500};    // µs 0...9
 uint32_t time_m[] = {1,2,5,10,20,50,100,200,500,800};  // ms 0...9 // 10 ... 19
 uint32_t time_s[] = {1,2,5,10,20,30,50,60,100,120};    // s  0...9 // 20 ... 29
@@ -156,11 +159,11 @@ uint8_t s_low=0,sel_o=0,dmax=0,freq_zw=0,tab_nr=0;
 
 char c = ' ',com_o = 'S'; // old command
 
-int8_t line_d=0,sel_c=0,hz_nr=0;
+int8_t line_d=0,sel_c=0,hz_nr=0,sweep_r=0;
 
 
 
-int i_del=3,i_sw=2,grad;    // 4 ?
+int i_del=3,i_sw=2,grad,step_s=1,stap=0,endp=1,iao,ieo;    // 4 ?
 uint8_t posc_t[] = {7, 5};
 int delay_micros = 1000;  // 1ms
 int sweep_nr     = 5000;  
@@ -213,6 +216,7 @@ void setup() {
   lcd.createChar(2, C_C_2_Arrow_U);  //########### Up
   lcd.createChar(3, C_C_3_Arrow_L);  //########### Left
   lcd.createChar(4, C_C_4_Arrow_R);  //########### Right
+  lcd.createChar(5, C_C_5_Tilde);    //########### Tilde 
   //lcd.createChar(5, C_C_5_Line_D);   //########### Line
   //lcd.createChar(6, C_C_6_Sine_1);   //########### Sine Top
   //lcd.createChar(7, C_C_7_Sine_2);   //########### Sine Down
@@ -220,22 +224,41 @@ void setup() {
   //lcd.createChar(2, C_C_9_Sine_4);   //########### Sine Up
   
   lcd.backlight(); //switch-on backlight,  lcd.noBacklight(); switch-off backlight 
-  
-  lcd.setCursor(0,0); lcd.print("Const.Cur.Source");  
-  lcd.setCursor(0,1); lcd.print("AD9833 Func.Gen."); // ("1 \344A ... 4.09 mA");
-  delay(500);
+  int8_t ilx=0,ily=1,ilz;
+  for (uint8_t ill = 0;ill<5;ill++) {
+    lcd.setCursor(0,ilx); lcd.print("Const.Cur.Source");  
+    lcd.setCursor(0,ily); lcd.print("AD9833 Func.Gen.");
+    ilz = ily;
+    ily = ilx;
+    ilx = ilz;
+    delay(500);
+  }  
 
-  ad9.Begin();
+  SPI.setDataMode(SPI_MODE0);
+  SPI.setBitOrder(MSBFIRST);
+  SPI.setClockDivider(SPI_CLOCK_DIV2);  // 8
+  SPI.begin();
+   
+ //  ad9.Begin();
   //ad9.ApplySignal(SINE_WAVE,REG0,15000);
   //ad9.EnableOutput(true);   // Turn ON the output - it defaults to OFF
 
   delay(200);
-       
-  dac.init();
+   /* 
+  dac.begin();
+
+  SPI.setDataMode(SPI_MODE0);
+  SPI.setBitOrder(MSBFIRST);
+  SPI.setClockDivider(SPI_CLOCK_DIV2);  // 8
+  SPI.begin();
+
+   // Configure analog outputs
+  dac.off_B();
+  dac.setGain2X_A();  // _AB();
 
   delay(200);
-
-  startDAC();
+*/
+  
 
 
 /*
@@ -272,23 +295,19 @@ void setup() {
   fillBlank(0,1,16); //lcd.setCursor(0,1);lcd.print("                ");  
 }
 
-void startDAC() {   // DAC MCP482X
+void startDAC() {
+  dac.begin();
+/*
+  SPI.setDataMode(SPI_MODE0);
+  SPI.setBitOrder(MSBFIRST);
+  SPI.setClockDivider(SPI_CLOCK_DIV2);  // 8
+  SPI.begin();
+*/
+   // Configure analog outputs
+  dac.off_B();
+  dac.setGain2X_A();  // _AB();
 
-  dac.init();
-
-  delay(50);
-
-    // The channels are turned off at startup so we need to turn the channel we need on
-  dac.turnOnChannelA();
-  dac.turnOnChannelB();
-   // We configure the channels in HIGH/LOW Gain (default: HIGH)
-   
-  dac.setGainA(MCP4822::High);  // here : write High / Low #####################
-  dac.setVoltageA(1000);
-  dac.setGainB(MCP4822::High);  // here : write High / Low #####################
-  delay(100);
-
-  digitalWrite(SWITCH_R, LOW);   // sets the digital pin LoW ( LOW: max. 4mA , HIGH: max. 40mA
+  delay(200);
   
 }
 
@@ -343,6 +362,7 @@ void fillFreqTab(long freq,uint8_t nr_t) {
     if      (nr_t == 0) freqSGLo[ilc] = 0;
     else if (nr_t == 1) freqSGHi[ilc] = 0; 
     else if (nr_t == 2) dig4_0_t[ilc] = 0;
+    else if (nr_t == 3) dig7_0_t[ilc] = 0;
     
     if (ilc > 0) pot = Power(ilc);
     else pot = 1;
@@ -355,6 +375,7 @@ void fillFreqTab(long freq,uint8_t nr_t) {
       if      (nr_t == 0) freqSGLo[ilc] = zw; 
       else if (nr_t == 1) freqSGHi[ilc] = zw; 
       else if (nr_t == 2) dig4_0_t[ilc] = zw;
+      else if (nr_t == 3) dig7_0_t[ilc] = zw;
     }
   }
 } 
@@ -441,20 +462,41 @@ void SG_StepSweep(void) {
 //-----------------------------------------------------------------------------
 void Sweep(int n) {
   int fmin,fmax;
+  long f;
   delay(100);
   but_p = 0;
   fmin = calcFreq(freqSGLo);
   fmax = calcFreq(freqSGHi);
-  int i=0; 
-  ad9.EnableOutput(true);    //
-  do {
-    long f = exp((log(fmax) - log(fmin))*i/(n-1) + log(fmin)) +0.5;
-    ad9.ApplySignal(wft_t,REG0,f); // 
-//    SG_freqSet(f, waveType);
-    delayMicroseconds(delay_micros); //delay(1);
-    i++;
-    if (i >= n) i = 0;
-  } while (but_p == 0) ;//!Serial.available());
+  int i= n-1; 
+  ad9.EnableOutput(true);     //
+  if (sweep_r == 0)        {  // up
+    while (but_p == 0)      {
+      for ( i=n-1;i>=0;i--)  {   
+        f=exp((log(fmax) - log(fmin)) * i/(n-1) + log(fmin)) + 0.5;  //??
+        ad9.ApplySignal(wft_t,REG0,f);
+        delayMicroseconds(delay_micros); //delay(1);
+      }
+    }
+  }
+  else if (sweep_r == 1)  { // up   
+    while (but_p == 0)     {
+      for ( i=0;i<=n-1;i++) {   
+        f=exp((log(fmax) - log(fmin)) * i/(n-1) + log(fmin)) + 0.5;   //??
+        ad9.ApplySignal(wft_t,REG0,f);
+        delayMicroseconds(delay_micros); //delay(1);
+      }
+    }
+  }                           
+  else if (sweep_r == 2)  { // up  and down
+    i = 0;
+    do {
+      f = exp((log(fmax) - log(fmin))*i/(n-1) + log(fmin)) + 0.5;  //
+      ad9.ApplySignal(wft_t,REG0,f); // 
+      delayMicroseconds(delay_micros); //delay(1);
+      i++;
+      if (i >= n) i = 0;
+    } while (but_p == 0) ;//!Serial.available());
+  }  
   ad9.ApplySignal(wft_t,REG0,fmin); // T
   ad9.EnableOutput(true);   // Turn ON the output - it defaults to OFF
   //SG_freqSet(calcFreq(freqSGLo), waveType);
@@ -560,7 +602,7 @@ void TabCommand(char com_x) {
       case 'C':  // 3 set Fequency Low continually or steps
       //  lcd.setCursor(0,1);//lcd.print(str_com[3]); 
         lcd.setCursor(10,0);lcd.print(" Hz    ");
-        s_low = 0;
+        s_low = 3;
         changeFreqLoContin();
         fox = f_lowo;
         for (itt=0;itt<numberOfDigits;itt++) {  // 0 ... 7
@@ -571,7 +613,7 @@ void TabCommand(char com_x) {
         goto switch_s;                           //####################
        break;      
       case 'H':  // 4 set Fequency High
-      //  lcd.setCursor(0,1);//lcd.print(str_com[3]); 
+      //  lcd.setCursor(0,1);//lcd.print(str_com[4]); 
         lcd.setCursor(10,0);lcd.print(" Hz    ");
         s_low = 1;
         changeFreqLoHi();
@@ -589,9 +631,13 @@ void TabCommand(char com_x) {
         goto switch_s;                           //####################
        break;      
       */ 
-      case 'G':  // 6 5weep-nr
-        lcd.setCursor(0,1);lcd.print(str_com[5]); 
-        lcd.setCursor(14,0);lcd.print("ok");
+      case 'G':  // 6 5weep-up/downr
+        lcd.setCursor(0,1);lcd.print(str_com[6]);
+        lcd.setCursor(6,1);
+        if      (sweep_r == 0) lcd.write(2);   // up 
+        else if (sweep_r == 1) lcd.write(1);   // down
+        else                   lcd.write(5);   // Tilde// direction: up,down, Tilde  
+      
         Sweep(sweep_nr); 
         lcd.setCursor(14,0);lcd.print("  ");
         if (com_o == ' ' ) com_o = 'S';
@@ -624,7 +670,7 @@ void TabCommand(char com_x) {
         goto switch_s;                          //####################
        break;    
       case 'D':  // 8 set delay 
-        lcd.setCursor(0,1);lcd.print(str_com[7]); // lcd.print("delay(ms)"); //\344s/ms)"); // \344 = µ
+        lcd.setCursor(0,1);lcd.print(str_com[8]); // lcd.print("delay(ms)"); //\344s/ms)"); // \344 = µ
         lcd.setCursor(10,1);lcd.print("                 ");
         changeDelay();
         lcd.setCursor(14,1);lcd.print("ok");
@@ -635,28 +681,28 @@ void TabCommand(char com_x) {
         com_x = com_o;
         goto switch_s;                          //####################
        break; 
-      case 'W':  // 9 sweep-nr
-        lcd.setCursor(0,1);lcd.print(str_com[8]); // lcd.print("sweep nr");
+      case 'W':  // 9 change sweep-pos-nr
+        lcd.setCursor(0,1);lcd.print(str_com[9]); lcd.print("sweep");
         changeSweepNr();
         lcd.setCursor(14,1);lcd.print("ok");
         delay(1000);
-        fillBlank(10,0,7); //lcd.setCursor(10,0);lcd.print("       ");
-        lcd.setCursor(14,1);lcd.print("  ");
+        fillBlank(10,0,7); 
+        fillBlank(10,1,6);
         if (com_o == ' ' ) com_o = 'S';
         com_x = com_o;
         goto switch_s;                          //####################
        break; 
       case 'R':  // 10 Reset AD9833
         lcd.setCursor(0,1);lcd.print(str_com[10]); // "Reset  ");
-        fillBlank(0,0,16); //lcd.setCursor(0,0);lcd.print("                ");
+        fillBlank(0,0,16); 
         ad9.Reset(); 
        break;    // SigGen reset 
       case 'X':  // 11 Return main
         lcd.setCursor(0,1);lcd.print(str_com[11]); // "Return  ");
-        fillBlank(0,0,16); //lcd.setCursor(0,0);lcd.print("                ");
+        fillBlank(0,0,16);
         delay(2000);
         s_end = 1; // <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<######################################
-        fillBlank(0,1,16); //lcd.setCursor(0,1);lcd.print("                ");
+        fillBlank(0,1,16); 
         return; 
        break;    // SigGen reset  
       default:  // return;
@@ -729,32 +775,65 @@ void changeDelay()  {
 }
 
 void changeSweepNr()  {
-  int z_number = 0;
-  oldEncPos = 999;
-  EncPos = 0;
-  but_p  = 0;
-  lcd.setCursor(0,0); lcd.blink();  
-  lcd.setCursor(0,0); lcd.print("sweep:        ");
-  lcd.setCursor(7,0); lcd.print(sweep_t[i_sw]); 
-  
-  lcd.print(" nr");
+    int z_number = 0;
+    uint8_t s_switch=0;
+    oldEncPos = 999;
+    EncPos  = 0;
+    but_p   = 0;
+    sweep_r = 2;
+    lcd.setCursor(0,0);   
+    lcd.setCursor(0,0); lcd.print("sweep-up/down: ");
+    lcd.setCursor(15,0); lcd.blink();
+    lcd.setCursor(15,0);
+    if      (sweep_r == 0) lcd.write(2);   // up 
+    else if (sweep_r == 1) lcd.write(1);   // down
+    else                   lcd.write(5);   // Tilde
+    while (but_p == 0)  {    // button-switch not pressed
+   
+      EncPos = myEnc.read();     //###################################
+      if (oldEncPos != EncPos) {
+        if (s_switch == 0) s_switch = 1;
+        else {
+          s_switch = 0;
+          lcd.setCursor(15,0);
+          if (enc_dir == 'r') sweep_r++;
+          if (enc_dir == 'l') sweep_r--;
+          if (sweep_r < 0) sweep_r = 2;
+          if (sweep_r > 2) sweep_r = 0;
+          if      (sweep_r == 0) lcd.write(2);   // up 
+          else if (sweep_r == 1) lcd.write(1);   // down
+          else                   lcd.write(5);   // Tilde
+        }  
+        oldEncPos = EncPos;
+      }  
+    }
+    oldEncPos = 999;
+   // lcd.print(" nr");
 //  while(1==1)  {
-     
+    but_p = 0; 
+    lcd.setCursor(11,1);
+    s_switch = 0;
     while (but_p == 0)  {    // button-switch not pressed
     
       EncPos = myEnc.read();     //###################################
       if (oldEncPos != EncPos) {
+        if (s_switch == 0) s_switch = 1;
+        else {
+          s_switch = 0;
           if (oldEncPos < EncPos) enc_dir = 'r';
           else                    enc_dir = 'l';           
-        if (enc_dir == 'r') if (i_sw <  5) i_sw++;
-        if (enc_dir == 'l') if (i_sw >  0) i_sw--;
+          if (enc_dir == 'r') if (i_sw <  5) i_sw++;
+          if (enc_dir == 'l') if (i_sw >  0) i_sw--;
         
-        fillBlank(7,0,9); //lcd.setCursor(7,0);lcd.print("         ");
-        lcd.setCursor(7,0);lcd.print(sweep_t[i_sw]); 
-        lcd.print(" nr");
-        z_number = sweep_t[i_sw];      
+          fillBlank(11,1,5); //lcd.setCursor(7,0);lcd.print("         ");
+          if (sweep_t[i_sw] >= 10000) lcd.setCursor(11,1);
+          else                        lcd.setCursor(12,1);
+          lcd.print(sweep_t[i_sw]); 
+        
+          z_number = sweep_t[i_sw];
+        }        
         oldEncPos = EncPos;  
-        lcd.setCursor(7,0);
+        lcd.setCursor(11,1);
       }  
     }  // while
     sweep_nr = z_number;
@@ -784,7 +863,10 @@ void changeFreqLoHi()  {
   }
   //else fillBlank(0,1,9);                 // Lo 
   line_d = 0;
-  if (s_low == 3) return;                  // continually rotation or Steps  ################
+  if (s_low == 3) {                        // continually rotation or Steps  ################
+     fox = f_lowo;
+     return;
+  }   
   if (s_low == 0 or s_low == 2) scanPos(); // Low- Frequency #############################
   if (s_low == 0) return;
   line_d = 1;
@@ -939,8 +1021,12 @@ void changeDigit_AD() {
        
          if (line_d == 0) freqSGLo[dig_x] = dig_n;  // save in tab  Low_frequeny   ##########################
          else             freqSGHi[dig_x] = dig_n;  // save in tab  High-frequency ##########################
+         
        //  Serial.print(" dx: "); Serial.print(dig_x);Serial.print(" digit: "); Serial.println(digi_t[dig_x]);
-         lcd.setCursor(pos_i,line_d);  lcd.print(dig_n);
+       //  Serial.print("s_low "); Serial.print(s_low);Serial.print(" line: "); Serial.print(line_d);Serial.print(" dig_n: "); Serial.println(dig_n);
+         
+         lcd.setCursor(pos_i,line_d);lcd.print(dig_n);
+        
          if (line_d == 0) {         
            if (s_low != 3) fox = 0;
            else            fox = fstart;
@@ -950,7 +1036,7 @@ void changeDigit_AD() {
               else ilf = ilf*10;
               fox = fox + freqSGLo[ilq] * ilf;
            }  
-           ad9.ApplySignal(zwave_t,REG0,fox);
+           ad9.ApplySignal(zwave_t,REG0,fox);  //ChangeDigit_AD
       //     ad9.EnableOutput(true);   // Turn ON the output - it defaults to OFF
          }  
  //      delay(50);  // 100
@@ -1123,7 +1209,7 @@ void  setDelay() {
 
 void  setStep() {
     
-    int16_t isi = 1,ilt;
+    int16_t isi = 1,ilt,ilu=0;
     oldEncPos = 999;
     s_first=0;
     but_p = 0; 
@@ -1139,17 +1225,29 @@ void  setStep() {
           s_first = 0;
           if (oldEncPos < EncPos) ilt = -1; 
           else                    ilt =  1; 
-          if      (ist >= 200) isi = 50;
-          else if (ist >= 100) isi = 20;
-          else if (ist >=  20) isi =  5; 
-          else if (ist >=  10) isi =  2; 
-          //else                 isi =  1;
+          if (ifu > 0) {  // Triangle, StepUp, StepDown
+            if      (ist >= 100) isi = 20;
+            else if (ist >=  50) isi = 10;
+            else if (ist >=  20) isi =  5; 
+            else if (ist >=  10) isi =  2; 
+          }
+          else {         // Sine  
+            ilu= ilu + ilt;
+            if      (ilu > 8) ilu = 0;
+            else if (ilu < 0) ilu = 8; 
+           
+          }
+          
           ist = ist + ilt * isi;  
    /*       if (ilt < 2) {
             if (ilt <= 0)  ist =  0;  // 360°
             else           ist =  3; 
           }*/
-          if (ist >= 500) ist = 500;
+          if (ist >= 200) ist = 200;
+          if (ifu == 0) {
+            ist = step_t[ilu];
+            step_s = ist;
+          }
           lcd.setCursor(13,1);  lcd.print("   ");
           if      (ist <  10)   lcd.setCursor(15,1);
           else if (ist < 100)   lcd.setCursor(14,1);
@@ -1165,6 +1263,87 @@ void  setStep() {
     iso = ist;
 }
 
+void  setStart() {
+    
+    int8_t ilt=iao;
+    oldEncPos = 999;
+    s_first=0;
+    but_p = 0; 
+    gainf = 1.0;
+    while(but_p == 0) {          // push-button not pressed
+      EncPos = myEnc.read();     //###################################
+      if (oldEncPos != EncPos) {
+        if (s_first == 0) s_first = 1;
+        else {
+          s_first = 0;
+          if (oldEncPos < EncPos) ilt--; 
+          else                    ilt++;
+          if (ifu > 1) { 
+            if (ilt >  step_s) ilt = step_s;
+          }
+          else if (ifu == 0) { 
+            if (ilt >  4 * step_s) ilt = 4*step_s-1;
+          }   
+          else if (ifu == 1) { 
+            if (ilt >  2 * step_s) ilt = 2*step_s-1;
+          }   
+          if (ilt <       0) ilt =  0; 
+          stap = ilt;
+          lcd.setCursor(0,0);  lcd.print("Sta"); 
+          lcd.setCursor(0,1);  lcd.print("   ");
+          if      (stap > 99)     lcd.setCursor(0,1);
+          else if (stap >  9)     lcd.setCursor(1,1);
+          else                    lcd.setCursor(2,1);
+          lcd.print(stap);
+        }            
+        oldEncPos = EncPos;
+        delay(100);
+      }   // if
+    }    // while
+    iao = ilt;
+}
+
+
+void  setEnd() {
+    
+    int8_t ilt=ieo;
+    oldEncPos = 999;
+    s_first=0;
+    but_p = 0; 
+    gainf = 1.0;
+    while(but_p == 0) {          // push-button not pressed
+      EncPos = myEnc.read();     //###################################
+      if (oldEncPos != EncPos) {
+        if (s_first == 0) s_first = 1;
+        else {
+          s_first = 0;
+          if (oldEncPos < EncPos) ilt--; 
+          else                    ilt++; 
+          if (ilt <  stap+1) ilt = stap+1; 
+          if ( ifu > 1) { 
+            if(ilt >= step_s) ilt = step_s;
+          }    
+          else if (ifu == 0) {
+            if (ilt >= 4 * step_s) ilt = 4 * step_s; 
+          }  
+          else if (ifu == 1) {
+            if (ilt >= 2 * step_s) ilt = 2 * step_s; 
+          }  
+          endp = ilt;
+          lcd.setCursor(4,0);  lcd.print("End"); 
+          lcd.setCursor(4,1);  lcd.print("   ");
+          if      (endp > 99)     lcd.setCursor(4,1);
+          else if (endp >  9)     lcd.setCursor(5,1);
+          else                    lcd.setCursor(6,1);
+          lcd.print(endp);
+        }             
+        oldEncPos = EncPos;
+        delay(100);
+      }   // if
+    }    // while
+    ieo = ilt;
+}
+
 void newDacVal(float vald) {
    if (ifu != 0) vald = vald*1000.00;     // not for sine 
    if (gainf != 1.0)  vald = vald * gainf;
@@ -1172,22 +1351,22 @@ void newDacVal(float vald) {
    if (off_s != 0)    vald = vald + (float)off_s;
    if (vald > 4095.0) vald = 4095.0;
    if (vald <    0.0) vald =    0.0;
-   dac.setVoltageA((int)vald);  
-   dac.updateDAC();
+ 
+   dac.setValue_A((int)vald);
+   
    if (delay_s > 0) {
      if (s_ms == 0) delayMicroseconds(delay_s);  // µs
      else           delay(delay_s);              // ms
    } 
-      
+  
 }
 
 
 void runSine()  {  // Sine
-
-   for(grad=0;grad<90;grad++) {        // quarter-Sinewave in Tab sin_t[90]
+   int32_t delay_m;
+   delay_m = 200;
+   for(grad=0;grad<90;grad+=step_s) {        // quarter-Sinewave in Tab sin_t[90]
      const float grad_bog = 0.01745329;  // pi / 180 
-  //   const float grad_tri = 0.01111111;  // 2  / 180
-  //   const float grad_upd = 0.00555556;  // 2  / 36
      wert = sin(grad_bog*(float)grad); // Bogenmaß Wertebereich -1 ... +1
      wert = wert+1.00; // nur positive Zahlen 0 ... +2
      wert = wert*1000.00;
@@ -1196,44 +1375,43 @@ void runSine()  {  // Sine
      if (sinx > 4095) sinx = 4095;
      sin_t[grad] = sinx;
    }  //for
-   oldEncPos = 998;
+ //  oldEncPos = EncPos;
    but_p = 0;
    while(but_p == 0) {   // run Sine-wave
- //F   lcd.setCursor(61,1);lcd.print(EncPos);
-  /*   if (oldEncPos != EncPos) {
-       if (enc_dir == 'l') delay_s++;
-       else                delay_s--;
-       if (delay_s < 0 )   delay_s = 0;
-       if (delay_s > 999)  delay_s = 999;
-       if      (delay_s > 99) lcd.setCursor(11,1);
-       else if (delay_s >  9) lcd.setCursor(12,1);
-       else                   lcd.setCursor(13,1);  
-       lcd.print(delay_s);
-       oldEncPos = EncPos;
-     }     */
-     for(grad=0;grad<=89;grad++) {  // first 0...90°
-       wert = (float)sin_t[grad];
+ 
+     for(grad=0;grad<=89;grad+=step_s) {  // first 0...90°
+       if(grad <= stap or grad >= endp)                  wert = 0.0;
+       else                                              wert = (float)sin_t[grad];
        newDacVal(wert);
        if (s_ms > 0 and but_p == 1) return;
      }  //for 1... 180
-     for(grad=89;grad>=0;grad--) {  // second 90...0°
-       wert = (float)sin_t[grad];
+     for(grad=89;grad>=0;grad-=step_s) {  // second 90...0°
+        if((grad + 90) <= stap or (grad + 90) >= endp)   wert = 0.0; 
+        else                                             wert = (float)sin_t[grad];
        newDacVal(wert);
        if (s_ms > 0 and but_p == 1) return;
      }  //for 1... 180
-     for(grad=0;grad<=89;grad++) { // third 0...90° ##### look 2000-sin_t[grad] ##############
-       wert = (float)(2000-sin_t[grad]);
+     for(grad=0;grad<=89;grad+=step_s) { // third 0...90° ##### look 2000-sin_t[grad] ##############
+       if((grad + 180) <= stap or (grad + 180) >= endp) wert = 0.0; 
+       else                                             wert = (float)(2000-sin_t[grad]);
        newDacVal(wert);
        if (s_ms > 0 and but_p == 1) return;
      }  //for
-     for(grad=89;grad>=0;grad--) { // fourth 0...90° ##### look 2000-sin_t[grad] ##############
-       wert = (float)(2000-sin_t[grad]);
+     for(grad=89;grad>=0;grad-=step_s) { // fourth 0...90° ##### look 2000-sin_t[grad] ##############
+       if((grad + 270) <= stap or (grad + 270) >= endp) wert = 0.0; 
+       else                                             wert = (float)(2000-sin_t[grad]);
        newDacVal(wert);
        if (s_ms > 0 and but_p == 1) return;
      }  //for
-     oldEncPos = 999;
-   } // while
-  
+  /*+###################################   test only #######################
+     if      (delay_s < delay_m)   delay_s++; 
+     else    delay_m =    0; 
+    
+     if (delay_s > delay_m) delay_s--;
+     else    delay_m = 200;
+     ###################################  test only  #####################*/
+   }  // while ... 
+   
 }
 
 
@@ -1247,12 +1425,14 @@ void runTriangle()  {  // Triangle
    but_p = 0;
    while(but_p == 0) {
      for(grad=0;grad<imx;grad++) { //
-       wert = grad_tri*(float)grad; // Triangle Wertebereich 0 ... +2
+       if(grad  <= stap or grad >= endp) wert = 0.0; 
+       else wert = grad_tri*(float)grad; // Triangle Wertebereich 0 ... +2
        newDacVal(wert);
        if (but_p == 1) return;
      }  //for
      for(grad=0;grad<imx;grad++) { //
-       wert = 2.00 - grad_tri*(float)grad; // Triangle Wertebereich +2 ... 0
+       if((grad+180) <= stap or (grad+180) >= endp) wert = 0.0; 
+       else wert = 2.00 - grad_tri*(float)grad; // Triangle Wertebereich +2 ... 0
        newDacVal(wert);
        if (but_p == 1) return;
      }  //for
@@ -1312,7 +1492,7 @@ void runSquareWave()  {  // SqareWave
        wert = 2.00; // SquareWavee Wertebereich +2 or 0
        ihl = 0;
      }
-      newDacVal(wert);
+     newDacVal(wert);
     
    } // while (but_p ...
   
@@ -1324,7 +1504,7 @@ void  ConstCurGraph() {
      char *str_fu = "Triangle";          
   sel_f:
 
-    lcd.setCursor(0,0);     lcd.print("select Function:");
+    lcd.setCursor(0,0);     lcd.print("select Sign.Typ:");
     fillBlank(0,1,16);   
      
     ifu = 4;
@@ -1348,10 +1528,16 @@ void  ConstCurGraph() {
  // lcd.setCursor(0, 0);   lcd.print("0,6-0.4 120  120");
     fillBlank(0,1,16); //lcd.setCursor(0, 1);   lcd.print("                "); 
     
-    setGainy();    // ## 0.1,...2.0           ########
-    setOffset();   // ## 0mv, 100mV, ... 2.0V ########
-    setDelay();    // ## 0 µs ...120 s        ######## 
-    if ( ifu > 0 and ifu < 4) setStep();     // 0 ... 500 ### not for sine and square ######## 
+    setGainy();      // ## 0.1,...2.0           ########
+    setOffset();     // ## 0mv, 100mV, ... 2.0V ########
+    setDelay();      // ## 0 µs ...120 s        ######## 
+    if (ifu < 4)  {  // ## not for squarewave   ########  
+      setStep();     // ## 0 ... 500 , sine: 1,2,3,5,6,9,15,30 
+    //  setStart();   // test
+    //  setEnd();     // test
+      
+    }
+    
     lcd.setCursor(0,0); lcd.print(str_fu);lcd.print(" started");
     if      (ifu == 0)   runSine();       // Sine
     else if (ifu == 1)   runTriangle();   // Triangle
@@ -1394,7 +1580,7 @@ void changeDigit() {
  
    s_upd = 0;
     
- 
+   lcd.blink_off(); //bl??
    fillBlank(0,0,9); //lcd.setCursor(0,0);lcd.print("         ");
  //  lcd.setCursor(6,0);lcd.print("ChaDi");
 
@@ -1430,7 +1616,8 @@ void changeDigit() {
        
      } 
     
-     lcd.setCursor(pos_i,1); lcd.blink();   //#################
+     lcd.setCursor(pos_i,1); 
+     //lcd.blink();   //bli?#################
      lcd.blink_off();
    
    }  // while but_p == 0) 
@@ -1440,7 +1627,7 @@ void changeDigit() {
    zconst =  1000*digi_t[3] + 100* digi_t[2] + 10 * digi_t[1] + digi_t[0];
    uint8_t s_blank = 1;
    for (int8_t ilr=3;ilr>=0;ilr--) { 
-  //    Serial.print("zconst ");Serial.print(zconst);Serial.print(" ilr ");Serial.print(ilr);Serial.print(" t[ilr] ");Serial.println(digi_t[ilr]);
+     Serial.print("zconst ");Serial.print(zconst);Serial.print(" ilr ");Serial.print(ilr);Serial.print(" t[ilr] ");Serial.println(digi_t[ilr]);
      lcd.setCursor(15-ilr,1);
      if (digi_t[ilr] == 0) {
        if (s_blank == 1)  lcd.print(" "); 
@@ -1468,6 +1655,7 @@ void changeDigit() {
     
      iconst = zconst;   
     
+    
    }               // if (s_upd == 1 
   
    istep = zconst;
@@ -1493,6 +1681,8 @@ void inc_dec_Iconst() {
     oldEncPos = 999;   //###################### 
 
     but_p = 0; 
+    zconst_o = 0;  //??
+    zconst   = zconst_o;
     while (but_p == 0) {                    // button-switch not pressed  
       EncPos = myEnc.read();     //###################################
       if (oldEncPos != EncPos) {
@@ -1502,12 +1692,11 @@ void inc_dec_Iconst() {
           if (oldEncPos < EncPos) cnt_r = -1; 
           else                    cnt_r =  1;
          
-          zconst_o = zconst;
-          
-          if (s_low != 3)   zconst = zconst_o + cnt_r * istep;
+        
+          if (s_low != 3)   zconst = zconst + cnt_r * istep;
           else {
-            if (s_kHz == 0) zconst = zconst_o + cnt_r * istep;
-            else            zconst = zconst_o + cnt_r * istep * 1000;
+            if (s_kHz == 0) zconst = zconst + cnt_r * istep;
+            else            zconst = zconst + cnt_r * istep * 1000;
           }
           if (zconst < 0) zconst = 0;
           if (s_low != 3) {
@@ -1519,16 +1708,16 @@ void inc_dec_Iconst() {
               if (s_par == 1) zconst = zconst_o;
             }
         
-            else { 
+            else {   // s_low == 3
              
               iconst = zconst;
-       //        Serial.print("557 istep: ");Serial.print(istep);Serial.print(" zconst: ");Serial.println(zconst);
+      //        Serial.print("1647 istep: ");Serial.print(istep);
               s_upd = 1;
           
               displayIconst();            //#########################################
-              if (s_par == 0) dac.setVoltageA(iconst);
-              else            dac.setVoltageA(iconst/10);
-              dac.updateDAC();
+              if (s_par == 0) dac.setValue_A(iconst);   
+              else            dac.setValue_A(iconst/10);
+        
               s_upd = 0;
             }   
           }  
@@ -1545,6 +1734,7 @@ void inc_dec_Iconst() {
             }
           } 
         } 
+        zconst_o = zconst; // ??
         oldEncPos = EncPos; 
       }  
     }  // while but_p == 0
@@ -1564,7 +1754,7 @@ void set_Iconst() {
      
     lcd.print("Ic\133\344A\135\Step ");   // HD47880 Sonderzeichen: \133: [ ,\135: ] ,\344: µ,\364: Omega (für z.B. Ohm 
   }
-  else {
+  else {  // == 3: contin
     fillBlank(0,1,10);
     set_Step_Hz_kHz();  //# 3 continous frequency-change  ad9 ##############
     lcd.setCursor(1,15);
@@ -1628,7 +1818,7 @@ void set_Iconst() {
           }      
           else  {                         // 11 start step-width incr./decr. with encoder or return
            
-            lcd.setCursor(pos_i,0); lcd.write(3);//print("<");  //########################
+            lcd.setCursor(pos_i,0); lcd.write(3);//print("<");  //########################  <<<<<  ######################
             s_stepa = 1;
             pos_i = pos_f + 1;
             but_p = 1;                                          // ######## to leave while ...
@@ -1678,18 +1868,18 @@ void set_Iconst() {
   
     }
               
-    changeDigit();         // ######################################
-    //else           changeDigit_AD();         // ######################################
+    changeDigit();            // ######################################
+    //            changeDigit_AD();         // AD??#####################################
     if (s_upd == 1) {
      
       if      (EncPos <  0) EncPos = 0;  // ??
        
       displayIconst(); //###########################################  
       if (s_low != 3) {
-        if (s_par == 0) dac.setVoltageA(iconst);
-        else            dac.setVoltageA(iconst/10);  // 100 Ohm
-        dac.updateDAC();
-      }  
+        if (s_par == 0) dac.setValue_A(iconst);  
+        else            dac.setValue_A(iconst/10);  // 100 Ohm
+     }  
+    // else fox = zconst;  //AD??
       s_upd = 0;
     }
   }
@@ -1698,12 +1888,17 @@ void set_Iconst() {
 }
 
 
-void set_Step_Hz_kHz() { // 1 Hz ... 9999 Hz or 1 kHz ... 99999kHz stepwidth
+void set_Step_Hz_kHz() { // 1 Hz ... 9999 Hz or 1 kHz ... 9999 kHz stepwidth
     
     int zEncPos;
-    s_kHz = 0;
+    s_kHz   = 0;
     s_first = 0; 
-    fstart = fox;
+    lcd.setCursor(0,1);lcd.print("f-Step");
+    lcd.setCursor(6,1);
+    if (s_kHz == 0) lcd.print("\133Hz\135? ");  // HD47880 special-sign:  \133: "["   \135 "]"
+    else            lcd.print("\133kHz\135? "); // HD47880 special-sign:  \133: "["   \135 "]"
+     
+    fstart  = fox;
     but_p = 0;  // 0=not pressed
     oldEncPos = 999;
     while (but_p == 0)  {        // button-switch not pressed
@@ -1712,19 +1907,23 @@ void set_Step_Hz_kHz() { // 1 Hz ... 9999 Hz or 1 kHz ... 99999kHz stepwidth
         if (s_first == 0) s_first = 1; // first  switch / teeth
         else {
           s_first = 0;                 // second switch / teeth
-          lcd.setCursor(0,1); 
+          lcd.setCursor(6,1); 
           if (s_kHz == 1) {
-            lcd.print("f-Step\133Hz\135: ");  // HD47880 special-sign:  \133: "["   \135 "]"
+            lcd.print("\133Hz\135: ");  // HD47880 special-sign:  \133: "["   \135 "]"  // Hz
             s_kHz = 0;
+          
           }
           else            {
-            lcd.print("f-Step\133kHz\135: "); // HD47880 special-sign:  \133: "["   \135 "]"
+            lcd.print("\133kHz\135: "); // HD47880 special-sign:  \133: "["   \135 "]"  kHz
             s_kHz = 1;
+           
           }
+         
         } 
         oldEncPos = EncPos;
       }   
     }   // while (but_p   
+    lcd.setCursor(15,1);
 }
 
 void set_Min_Step_Iconst() { // 1 µA or 10 µA step: max 4.095 mA or 40 mA
@@ -1785,22 +1984,23 @@ void displayIconst()  {
      */
      fillBlank(5,0,4); //lcd.setCursor(5, 0);           lcd.print("    ");  //??
      lcd.setCursor(0, 1); 
-     if (s_low == 3) {                            // AD9833-frequency   
-    // lcd.print("f-Step\133\kHz\135\:");         // HD47880 Sonderzeichen: \133: [ ,\135: ] ,\344: µ,\364: Omega (für z.B. Ohm  
-                                    // 
-       //zf = fox; //fox + istep;
-       zf = iconst; //fox + istep;
-    //   Serial.print("fox ");Serial.print(fox);Serial.print(" iconst ");Serial.print(iconst);Serial.print(" istep ");Serial.println(istep);
-       ad9.ApplySignal(zwave_t,REG0,fox); //  ##############################################################
-       tab_nr = 0;               // tab freqSGLo
-       fillFreqTab(zf,tab_nr);  // tab freqSGLo
-       lcd.setCursor(2,0); 
+     if (s_low == 3) {                            // AD9833-frequency  contin. 
+      //  Serial.print("_flowo ");Serial.print(f_lowo);Serial.print(" fox ");Serial.print(fox);Serial.print(" iconst ");Serial.print(iconst);Serial.print(" istep ");Serial.println(istep);                              // 
+       if (s_stepa == 0) return; 
+       fox = f_lowo + iconst;
+       if (fox < 0) fox = 0;
+   
+       Serial.print("fox ");Serial.print(fox);Serial.print(" iconst ");Serial.print(iconst);Serial.print(" istep ");Serial.println(istep);
+       ad9.ApplySignal(zwave_t,REG0,fox); //  DisplayIconst ##############################################################
+       tab_nr = 3;               // tab dig7_0_t
+       fillFreqTab(fox,tab_nr);  // tab freqSGLo
+       lcd.setCursor(2,0);      // fill upper Line          
        for (ilq=numberOfDigits-1;ilq>=0;ilq--) {   // 8
-         if (freqSGLo[ilq] == 0 and ilq >= dmax) lcd.print(" ");
-         else                                    lcd.print(freqSGLo[ilq]);
+         if (dig7_0_t[ilq] == 0 and ilq >= dmax) lcd.print(" ");
+         else                                    lcd.print(dig7_0_t[ilq]);
        }
-     //  fox = zf;  //<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<####################################<<<<<<<<<<<<<<<<<<<<<<<<<<<
-      // lcd.setCursor(10,0); lcd.print(dmax); 
+       fox = f_lowo;
+     
        return;
      }
      else {                                    // iconst s_low = 0/1/2
@@ -1854,6 +2054,7 @@ void changeFreqLoContin()  {
   s_low = 3;    
   changeFreqLoHi();    //# here: show lofrequency on display######################
   set_Iconst(); 
+  
   delay(40);
 }
 
@@ -1863,6 +2064,7 @@ void loop(){
     sel_c   = 0;    // ??
     EncPos    = 999;
     oldEncPos = 999;
+    lcd.setCursor(0,0); lcd.print("Select Function:");
     while (but_p == 0)  {        // button-switch not pressed
       EncPos = myEnc.read();     //###################################
       if (oldEncPos != EncPos) {  
@@ -1872,10 +2074,10 @@ void loop(){
           if (EncPos > oldEncPos) ila++;
           else                    ila--;
           if (ila > 2) ila = 0;        if (ila < 0) ila = 2;
-          lcd.setCursor(0,0); //lcd.print(ila);
+          lcd.setCursor(0,1); //lcd.print(ila);
           if      (ila == 0) lcd.print("AD9833-Func-Gen.");
           else if (ila == 1) lcd.print("Const.Cur.Source");
-          else if (ila == 2) lcd.print("Const.Curr.Graph");
+          else if (ila == 2) lcd.print("LowFreq-Func-Gen");
           delay(100);
        } // if
        oldEncPos = EncPos;
@@ -1883,19 +2085,32 @@ void loop(){
    } // while     
    but_p = 0;  
    if      (ila == 0) {  // AD9833-Func-Gen.
-//     ad9.ApplySignal(SINE_WAVE,REG0,1111);
-//     ad9.EnableOutput(true);   // Turn ON the output - it defaults to OFF
-   
+     fillBlank(0,1,16);
+     lcd.setCursor(0,0);lcd.print("AD9833-Func-Gen."); 
+     delay(1000);
+     ad9.Begin();
+     ad9.ApplySignal(SINE_WAVE,REG0,1111);
+     ad9.EnableOutput(true);   // Turn ON the output - it defaults to OFF
      controlAD9833();
-   
+     digitalWrite(SG_FSYNC,HIGH);
    }
    else if (ila == 1) {  // Const.Cur.Source
+     fillBlank(0,1,16);
+     lcd.setCursor(0,0);lcd.print("Const.Cur.Source"); 
+     delay(1000);
      startDAC();
      set_Iconst();
+     dac.off_A();
+     digitalWrite(DAC_CS,HIGH);
    }  
    else if (ila == 2) {  // Const.Cur.Graph
+     fillBlank(0,1,16);
+     lcd.setCursor(0,0);lcd.print("LowFreq-Func-Gen"); 
+     delay(1000);
      startDAC(); 
      ConstCurGraph();
+     dac.off_A();
+     digitalWrite(DAC_CS,HIGH);
    }
    but_p = 0;  
    delay(100);
