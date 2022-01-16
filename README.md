@@ -1,4 +1,4 @@
-# AD9833-Simple-Function-Generator-
+# AD9833-Simple-Function-Generator
 
 
 Squarewave for low frequencies.
